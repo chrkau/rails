@@ -3,11 +3,33 @@ load File.expand_path("../set_rails_env.rake", __FILE__)
 module Capistrano
   class FileNotFound < StandardError
   end
+
+  module DSL
+    module Paths
+      def rails_subpath
+        rails_subpath = fetch(:rails_subpath)
+        if !rails_subpath.nil? && !rails_subpath.end_with?('/')
+          "#{rails_subpath}/"
+        else
+          ''
+        end
+      end
+
+      def rails_release_path
+        if rails_subpath
+          release_path.join(rails_subpath)
+        else
+          release_path
+        end
+      end
+    end
+  end
 end
 
 namespace :deploy do
   before :starting, :set_shared_assets do
-    set :linked_dirs, (fetch(:linked_dirs) || []).push('public/assets')
+    set(:linked_dirs,
+      (fetch(:linked_dirs) || []).push("#{rails_subpath}public/assets"))
   end
 
   desc 'Normalise asset timestamps'
@@ -15,7 +37,7 @@ namespace :deploy do
     on roles :web do
       assets = fetch(:normalize_asset_timestamps)
       if assets
-        within release_path do
+        within rails_release_path do
           execute :find, "#{assets} -exec touch -t #{asset_timestamp} {} ';'; true"
         end
       end
@@ -32,7 +54,7 @@ namespace :deploy do
   desc 'Cleanup expired assets'
   task :cleanup_assets => [:set_rails_env] do
     on roles :web do
-      within release_path do
+      within rails_release_path do
         with rails_env: fetch(:rails_env) do
           execute :rake, "assets:clean"
         end
@@ -58,7 +80,7 @@ namespace :deploy do
   namespace :assets do
     task :precompile do
       on roles :web do
-        within release_path do
+        within rails_release_path do
           with rails_env: fetch(:rails_env) do
             execute :rake, "assets:precompile"
           end
@@ -68,19 +90,19 @@ namespace :deploy do
 
     task :backup_manifest do
       on roles :web do
-        within release_path do
+        within rails_release_path do
           execute :cp,
-            release_path.join('public', 'assets', 'manifest*'),
-            release_path.join('assets_manifest_backup')
+            rails_release_path.join('public', 'assets', 'manifest*'),
+            rails_release_path.join('assets_manifest_backup')
         end
       end
     end
 
     task :restore_manifest do
       on roles :web do
-        within release_path do
-          source = release_path.join('assets_manifest_backup')
-          target = capture(:ls, release_path.join('public', 'assets',
+        within rails_release_path do
+          source = rails_release_path.join('assets_manifest_backup')
+          target = capture(:ls, rails_release_path.join('public', 'assets',
                                                   'manifest*')).strip
           if test "[[ -f #{source} && -f #{target} ]]"
             execute :cp, source, target
